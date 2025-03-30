@@ -1,0 +1,12 @@
+{
+  "watch": [
+    "src"
+  ],
+  "ext": "ts,json",
+  "ignore": [
+    "src/**/*.spec.ts"
+  ],
+  "delay": "1000",
+  "legacyWatch": true,
+  "exec": "npx ts-node ./src/server.ts"
+}

@@ -1,0 +1,13 @@
+# backend/.dockerignore
+
+# Defines files and directories to exclude from Docker image builds to optimize size and build performance
+
+node_modules        # Excludes the node_modules directory (rebuilt in container)
+dist                # Excludes the compiled output directory
+.env*               # Excludes all .env files (e.g., .env, .env.development)
+*.log               # Excludes log files
+.git                # Excludes Git version control directory
+.DS_Store           # Excludes macOS-specific system files
+nodemon.json        # Excludes nodemon configuration file for local development
+
+# Other files not needed in the Docker image

@@ -1,0 +1,40 @@
+# backend/.gitignore || frontend/.gitignore
+node_modules
+dist
+.env*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+/backend/private.pem
+/backend/public.pem
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependency directories
+
+# System files
+.DS_Store
+
+# Build output
+dist-ssr
+coverage
+
+# Local environment files
+*.local
+
+# Cypress testing artifacts
+/cypress/videos/
+/cypress/screenshots/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# TypeScript build info
+*.tsbuildinfo

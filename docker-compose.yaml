@@ -1,0 +1,155 @@
+# docker-compose.yaml
+# --- Docker Compose Configuration ---
+# Defines the multi-container setup for the EHR-FHIR application environment.
+# This allows for consistent development, testing, and potentially deployment environments.
+# For detailed documentation, see: https://docs.docker.com/compose/compose-file/
+
+services:
+  # --- Backend Service (Express.js API) ---
+  backend:
+    build:
+      context: ./backend # Specifies the directory containing the Dockerfile and source code.
+      dockerfile: Dockerfile # Specifies the name of the Dockerfile to use for building the image.
+    container_name: ehr-backend # Assigns a specific, predictable name to the container.
+    ports:
+      # Maps port 3333 on the host machine to port 3333 inside the container.
+      # Format: "HOST:CONTAINER"
+      # Allows accessing the backend API from the host machine via http://localhost:3333.
+      - "3333:3333"
+    env_file:
+      # Loads environment variables from the specified file within the build context (./backend/.env).
+      # This is crucial for injecting sensitive information (like DB credentials, JWT secrets)
+      # and configurations without hardcoding them in the image or compose file.
+      - ./backend/.env
+    depends_on:
+      # Defines startup dependencies. The backend service will only start *after*
+      # the ehr-postgres service reports itself as healthy.
+      ehr-postgres:
+        condition: service_healthy # Waits for the healthcheck defined in ehr-postgres to pass.
+    networks:
+      # Connects this service to the custom bridge network 'ehr-network'.
+      # Services on the same custom network can reach each other using their service names as hostnames.
+      - ehr-network
+
+  # --- Frontend Service (Vue.js App) ---
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ehr-frontend
+    ports:
+      # Maps port 8080 on the host to port 80 inside the container (where nginx/webserver serves the app).
+      - "8080:80"
+    environment:
+      # Sets environment variables directly within the container.
+      # NODE_ENV=production often triggers optimizations in build tools and frameworks.
+      # Note: VITE_API_BASE_URL is typically needed here or configured during build time
+      #       to tell the frontend where the backend API is located within the Docker network.
+      # Example: VITE_API_BASE_URL=http://ehr-backend:3333/api
+      - NODE_ENV=production
+    depends_on:
+      # Frontend depends on the backend service being started (though not necessarily healthy,
+      # as the frontend might be able to load even if the API isn't fully ready yet).
+      - backend
+    networks:
+      - ehr-network
+
+  # --- PostgreSQL Database for EHR Application ---
+  ehr-postgres:
+    image: postgres:17-alpine # Uses the official PostgreSQL image (version 17, Alpine variant for smaller size).
+    container_name: ehr-postgres
+    environment:
+      # Configures the PostgreSQL container using environment variables.
+      # These are standard variables recognized by the official Postgres image.
+      - POSTGRES_USER=ehr_user
+      - POSTGRES_PASSWORD=ehr_password # WARNING: Use Docker secrets or external config for production passwords.
+      - POSTGRES_DB=ehr_db
+    volumes:
+      # Mounts a named volume 'postgres-data' to the container's data directory.
+      # This ensures that database data persists even if the container is stopped or removed.
+      # Named volumes are managed by Docker.
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      # Exposes the PostgreSQL port (5432) to the host machine on port 5433.
+      # Allows direct connection to the database from the host (e.g., using pgAdmin) for debugging/management.
+      # Format: "HOST:CONTAINER" -> Host 5433 connects to Container 5432
+      - "5433:5432"
+    networks:
+      - ehr-network
+    healthcheck:
+      # Defines how Docker should check if the database service is ready and healthy.
+      # This is crucial for `depends_on.condition: service_healthy`.
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB -h localhost"] # Command to run inside the container. Uses shell env vars.
+      interval: 10s    # How often to run the check.
+      timeout: 5s     # Max time to wait for the check command to complete.
+      retries: 5      # Number of consecutive failures before marking as unhealthy.
+      start_period: 30s # Grace period after container start before failures count towards retries. Allows time for DB init.
+
+  # --- PostgreSQL Database for HAPI FHIR Server ---
+  # Design Choice: Separate database instance for HAPI FHIR.
+  # Rationale: Isolates the FHIR server's data management from the main EHR application's database.
+  #            This prevents potential schema conflicts or performance interference. It also allows
+  #            independent scaling or versioning of the FHIR persistence layer if needed.
+  fhir-db:
+    image: postgres:17-alpine # Using the same Postgres version for consistency.
+    container_name: fhir-db
+    environment:
+      # Separate credentials for the FHIR database.
+      - POSTGRES_USER=hapi_fhir_user
+      - POSTGRES_PASSWORD=hapi_fhir_password # WARNING: Production security.
+      - POSTGRES_DB=hapi_fhir_db
+    volumes:
+      # Separate named volume for FHIR data persistence.
+      - fhir-db-data:/var/lib/postgresql/data
+    ports:
+      # Exposes this DB to the host on a different port (5434) to avoid conflicts with ehr-postgres.
+      - "5434:5432" # Host 5434 -> Container 5432
+    networks:
+      - ehr-network
+    healthcheck:
+      # Similar healthcheck as the main EHR database.
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB -h localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # --- HAPI FHIR Server Service ---
+  fhir:
+    image: "hapiproject/hapi:latest" # Uses the official HAPI FHIR JPA server image. 'latest' tag might be unstable; consider pinning to a specific version in production.
+    container_name: fhir
+    ports:
+      # Maps host port 8070 to the HAPI FHIR server's default port 8080 inside the container.
+      - "8070:8080" # Host 8070 -> Container 8080
+    configs:
+      # Mounts a Docker config ('hapi-config') into the container at the specified target path.
+      # This allows injecting the HAPI FHIR application configuration file (application.yaml).
+      - source: hapi-config # Name of the Docker config defined below.
+        target: /app/config/application.yaml # Path inside the HAPI FHIR container where the config file should be placed.
+    depends_on:
+      # HAPI FHIR server depends on its dedicated database being healthy before starting.
+      fhir-db:
+        condition: service_healthy
+    networks:
+      - ehr-network
+
+# --- Network Definition ---
+# Defines the custom bridge network used by the services.
+networks:
+  ehr-network:
+    driver: bridge # Standard Docker bridge network driver. Allows container-to-container communication via service names.
+
+# --- Config Definition ---
+# Defines a Docker config resource.
+configs:
+  hapi-config:
+    # Specifies that the config content comes from a local file.
+    file: ./hapi.application.yaml # Path relative to the docker-compose.yaml file.
+
+# --- Volume Definitions ---
+# Defines named volumes for data persistence. Docker manages these volumes.
+volumes:
+  postgres-data: # Volume for the main EHR database.
+    driver: local # Standard local volume driver.
+  fhir-db-data: # Separate volume for the HAPI FHIR database.
+    driver: local
