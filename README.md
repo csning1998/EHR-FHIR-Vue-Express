@@ -172,7 +172,7 @@ EHR-FHIR-Vue-Express/
 
 1.  **Clone the Project:**
     ```bash
-    git clone <repository_url>
+    git clone https://github.com/csning1998/EHR-FHIR-Vue-Express.git
     cd EHR-FHIR-Vue-Express
     ```
 
